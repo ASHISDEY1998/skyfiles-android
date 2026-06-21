@@ -24,6 +24,10 @@ import me.zhanghai.android.files.util.createIntent
 import me.zhanghai.android.files.util.fadeToVisibilityUnsafe
 import me.zhanghai.android.files.util.getDrawable
 import me.zhanghai.android.files.util.startActivitySafe
+import me.zhanghai.android.files.filelist.HomeActivity
+import android.content.Intent
+import me.zhanghai.android.files.util.extraPath
+import me.zhanghai.android.files.util.SkyFilesLogger
 
 class StorageListFragment : Fragment(), StorageListAdapter.Listener {
     private lateinit var binding: StorageListFragmentBinding
@@ -93,7 +97,22 @@ class StorageListFragment : Fragment(), StorageListAdapter.Listener {
     }
 
     override fun editStorage(storage: Storage) {
-        startActivitySafe(storage.createEditIntent())
+        val path = storage.path
+        if (path != null) {
+            val hostActivity = activity
+            if (hostActivity is HomeActivity) {
+                parentFragmentManager.popBackStackImmediate()
+                hostActivity.navigateToRoot(path)
+            } else {
+                val intent = HomeActivity::class.createIntent()
+                    .apply { extraPath = path }
+                    .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                startActivity(intent)
+                hostActivity?.finish()
+            }
+        } else {
+            startActivitySafe(storage.createEditIntent())
+        }
     }
 
     override fun moveStorage(fromPosition: Int, toPosition: Int) {

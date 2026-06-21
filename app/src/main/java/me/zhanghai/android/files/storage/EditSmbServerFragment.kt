@@ -37,6 +37,8 @@ import me.zhanghai.android.files.util.showToast
 import me.zhanghai.android.files.util.takeIfNotEmpty
 import me.zhanghai.android.files.util.viewModels
 import java.net.URI
+import android.util.Log
+import me.zhanghai.android.files.util.SkyFilesLogger
 
 class EditSmbServerFragment : Fragment() {
     private val args by args<Args>()
@@ -242,8 +244,14 @@ class EditSmbServerFragment : Fragment() {
             }
             is ActionState.Error -> {
                 val throwable = state.throwable
-                throwable.printStackTrace()
-                showToast(throwable.toString())
+                Log.e("SkyFiles", "SMB FAILURE", throwable)
+                me.zhanghai.android.files.provider.smb.client.Client.logExceptionChain("SMB FAILURE DETAILS", throwable)
+
+                var userFriendlyMessage = mapToUserFriendlyError(throwable)
+                if (me.zhanghai.android.files.provider.smb.client.Client.SmbDiagnosticsTracker.serverAppearsSmb1Only == "true") {
+                    userFriendlyMessage += "\nThis router appears to support only SMB1. SMBJ may not support this device."
+                }
+                showToast(userFriendlyMessage)
                 viewModel.finishConnecting()
             }
         }
@@ -331,5 +339,65 @@ class EditSmbServerFragment : Fragment() {
         PASSWORD,
         GUEST,
         ANONYMOUS
+    }
+
+    private fun mapToUserFriendlyError(throwable: Throwable): String {
+        var cause: Throwable? = throwable
+        var hasUnknownHost = false
+        var hasSocketTimeout = false
+        var hasConnectException = false
+        var hasLogonFailure = false
+        var hasAccessDenied = false
+        var hasShareNotFound = false
+        var hasNegotiationFailed = false
+        var hasTransportException = false
+        var hasEofException = false
+
+        while (cause != null) {
+            val className = cause.javaClass.name
+            val message = cause.message.orEmpty()
+            
+            if (cause is java.net.UnknownHostException || className.contains("UnknownHostException")) {
+                hasUnknownHost = true
+            }
+            if (cause is java.net.SocketTimeoutException || className.contains("SocketTimeoutException") || message.contains("timeout", ignoreCase = true)) {
+                hasSocketTimeout = true
+            }
+            if (cause is java.net.ConnectException || className.contains("ConnectException") || message.contains("Connection refused", ignoreCase = true)) {
+                hasConnectException = true
+            }
+            if (message.contains("STATUS_LOGON_FAILURE") || message.contains("logon failure", ignoreCase = true)) {
+                hasLogonFailure = true
+            }
+            if (message.contains("STATUS_ACCESS_DENIED") || message.contains("access denied", ignoreCase = true)) {
+                hasAccessDenied = true
+            }
+            if (message.contains("STATUS_BAD_NETWORK_NAME") || message.contains("STATUS_OBJECT_NAME_NOT_FOUND") || message.contains("STATUS_OBJECT_PATH_NOT_FOUND")) {
+                hasShareNotFound = true
+            }
+            if (message.contains("negotiat", ignoreCase = true) || className.contains("NegotiationException")) {
+                hasNegotiationFailed = true
+            }
+            if (cause is java.io.EOFException || className.contains("EOFException")) {
+                hasEofException = true
+            }
+            if (className.contains("TransportException")) {
+                hasTransportException = true
+            }
+            cause = cause.cause
+        }
+
+        return when {
+            hasUnknownHost -> "Host not reachable"
+            hasSocketTimeout -> "Connection timeout"
+            hasConnectException -> "Host not reachable"
+            hasLogonFailure -> "Authentication failed"
+            hasAccessDenied -> "Access denied"
+            hasShareNotFound -> "Share not found"
+            hasEofException -> "Server closed connection during SMB negotiation"
+            hasNegotiationFailed -> "SMB negotiation failed"
+            hasTransportException -> "SMB negotiation failed"
+            else -> "Unknown SMB error"
+        }
     }
 }

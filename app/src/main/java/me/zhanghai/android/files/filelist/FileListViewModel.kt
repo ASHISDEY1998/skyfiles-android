@@ -19,6 +19,8 @@ import me.zhanghai.android.files.provider.archive.archiveRefresh
 import me.zhanghai.android.files.provider.archive.isArchivePath
 import me.zhanghai.android.files.util.CloseableLiveData
 import me.zhanghai.android.files.util.Stateful
+import me.zhanghai.android.files.util.Success
+import me.zhanghai.android.files.util.Failure
 import me.zhanghai.android.files.util.valueCompat
 import java.io.Closeable
 
@@ -61,19 +63,65 @@ class FileListViewModel : ViewModel() {
         _searchStateLiveData.value = SearchState(false, "")
     }
 
+    val customFileListLiveData = MutableLiveData<Stateful<List<FileItem>>?>(null)
+    private val _filteredCustomFileListLiveData = MediatorLiveData<Stateful<List<FileItem>>>()
+
+    init {
+        _filteredCustomFileListLiveData.addSource(customFileListLiveData) { updateFilteredCustomFiles() }
+        _filteredCustomFileListLiveData.addSource(_searchStateLiveData) { updateFilteredCustomFiles() }
+    }
+
+    private fun updateFilteredCustomFiles() {
+        val stateful = customFileListLiveData.value ?: return
+        val search = _searchStateLiveData.value ?: SearchState(false, "")
+        if (stateful is Success<*>) {
+            @Suppress("UNCHECKED_CAST")
+            val list = (stateful as Success<List<FileItem>>).value
+            val filtered = if (search.isSearching && search.query.isNotEmpty()) {
+                list.filter { it.name.contains(search.query, ignoreCase = true) }
+            } else {
+                list
+            }
+            _filteredCustomFileListLiveData.value = Success(filtered)
+        } else {
+            _filteredCustomFileListLiveData.value = stateful
+        }
+    }
+
     private val _fileListLiveData =
         FileListSwitchMapLiveData(currentPathLiveData, _searchStateLiveData)
+
+    private val _mergedFileListLiveData = MediatorLiveData<Stateful<List<FileItem>>>().apply {
+        addSource(_fileListLiveData) {
+            if (customFileListLiveData.value == null) {
+                value = it
+            }
+        }
+        addSource(_filteredCustomFileListLiveData) {
+            if (customFileListLiveData.value != null) {
+                value = it
+            }
+        }
+    }
+
     val fileListLiveData: LiveData<Stateful<List<FileItem>>>
-        get() = _fileListLiveData
+        get() = _mergedFileListLiveData
+
     val fileListStateful: Stateful<List<FileItem>>
-        get() = _fileListLiveData.valueCompat
+        get() = if (customFileListLiveData.value != null) {
+            _filteredCustomFileListLiveData.value ?: customFileListLiveData.value!!
+        } else {
+            _fileListLiveData.valueCompat
+        }
 
     fun reload() {
-        val path = currentPath
-        if (path.isArchivePath) {
-            path.archiveRefresh()
+        if (customFileListLiveData.value == null) {
+            val path = currentPath
+            if (path.isArchivePath) {
+                path.archiveRefresh()
+            }
+            _fileListLiveData.reload()
         }
-        _fileListLiveData.reload()
     }
 
     val searchViewExpandedLiveData = MutableLiveData(false)

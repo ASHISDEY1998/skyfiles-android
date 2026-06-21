@@ -8,4 +8,6 @@
 <resources>
 
     <integer name="file_list_toolbar_scroll_flags">@integer/scrollFlags_noScroll</integer>
+
+    <integer name="skyfiles_locations_columns">4</integer>
 </resources>

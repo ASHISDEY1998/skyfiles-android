@@ -45,6 +45,8 @@ import java.io.Closeable
 import java.io.IOException
 import java.net.Inet4Address
 import java.net.UnknownHostException
+import android.util.Log
+import me.zhanghai.android.files.util.SkyFilesLogger
 import java.util.Collections
 import java.util.WeakHashMap
 import java.util.concurrent.Future
@@ -89,19 +91,24 @@ object Client {
         val session = getSession(path.authority)
         val sharePath = path.sharePath
         if (sharePath == null) {
+            SmbDiagnosticsTracker.shareEnumeration = "PENDING"
             val transport = try {
                 SMBTransportFactories.SRVSVC.getTransport(session)
-            } catch (e: IOException) {
-                throw ClientException(e)
-            } catch (e: SMBRuntimeException) {
+            } catch (e: Exception) {
+                SkyFilesLogger.e("SkyFiles", "SHARE ENUMERATION FAILED")
+                logExceptionChain("SHARE ENUMERATION FAILED DETAILS", e)
+                SmbDiagnosticsTracker.shareEnumeration = "FAIL"
+                SmbDiagnosticsTracker.logSummary()
                 throw ClientException(e)
             }
             val serverService = ServerService(transport)
             val netShareInfos = try {
                 serverService.shares1
-            } catch (e: IOException) {
-                throw ClientException(e)
-            } catch (e: SMBRuntimeException) {
+            } catch (e: Exception) {
+                SkyFilesLogger.e("SkyFiles", "SHARE ENUMERATION FAILED")
+                logExceptionChain("SHARE ENUMERATION FAILED DETAILS", e)
+                SmbDiagnosticsTracker.shareEnumeration = "FAIL"
+                SmbDiagnosticsTracker.logSummary()
                 throw ClientException(e)
             }
             val sharePaths = netShareInfos.mapNotNull {
@@ -113,6 +120,8 @@ object Client {
                     null
                 }
             }
+            SmbDiagnosticsTracker.shareEnumeration = "PASS"
+            SmbDiagnosticsTracker.logSummary()
             return object : CloseableIterator<Path>, Iterator<Path> by sharePaths.iterator() {
                 override fun close() {}
             }
@@ -589,6 +598,97 @@ object Client {
         }
     }
 
+    object SmbDiagnosticsTracker {
+        var host: String = ""
+        var dns: String = "N/A"
+        var tcp: String = "N/A"
+        var negotiation: String = "N/A"
+        var authentication: String = "N/A"
+        var shareEnumeration: String = "N/A"
+        var shareOpen: String = "N/A"
+        
+        var failureStage: String = "NONE"
+        var exceptionDetails: String = "NONE"
+        
+        var smbjVersion: String = "0.11.5"
+        var negotiatedDialect: String = "N/A"
+        var signingRequired: String = "N/A"
+        var signingEnabled: String = "N/A"
+        var serverName: String = "N/A"
+        var serverOS: String = "UNKNOWN"
+        var serverAppearsSmb1Only: String = "false"
+
+        fun reset(hostName: String) {
+            host = hostName
+            dns = "N/A"
+            tcp = "N/A"
+            negotiation = "N/A"
+            authentication = "N/A"
+            shareEnumeration = "N/A"
+            shareOpen = "N/A"
+            failureStage = "NONE"
+            exceptionDetails = "NONE"
+            negotiatedDialect = "N/A"
+            signingRequired = "N/A"
+            signingEnabled = "N/A"
+            serverName = "N/A"
+            serverOS = "UNKNOWN"
+            serverAppearsSmb1Only = "false"
+        }
+
+        fun logSummary() {
+            if (failureStage == "NONE") {
+                if (dns == "FAIL") failureStage = "DNS"
+                else if (tcp == "FAIL") failureStage = "TCP"
+                else if (negotiation == "FAIL") failureStage = "NEGOTIATION"
+                else if (authentication == "FAIL") failureStage = "AUTH"
+                else if (shareEnumeration == "FAIL") failureStage = "ENUMERATION"
+                else if (shareOpen == "FAIL") failureStage = "SHARE_OPEN"
+            }
+            
+            val summary = """
+                ===== SMB DIAGNOSTICS =====
+                Server=$host
+                IP=${if (dns == "PASS") "RESOLVED" else "N/A"}
+                DNS=$dns
+                TCP=$tcp
+                NEGOTIATION=$negotiation
+                AUTH=$authentication
+                ENUMERATION=$shareEnumeration
+                SHARE_OPEN=$shareOpen
+                SMBJ_VERSION=$smbjVersion
+                NEGOTIATED_DIALECT=$negotiatedDialect
+                SUPPORTED_DIALECTS=SMB_2_0_2, SMB_2_1, SMB_3_0, SMB_3_0_2, SMB_3_1_1
+                SERVER_NAME=$serverName
+                SERVER_OS=$serverOS
+                SIGNING_REQUIRED=$signingRequired
+                SIGNING_ENABLED=$signingEnabled
+                SERVER_APPEARS_SMB1_ONLY=$serverAppearsSmb1Only
+                FIRST_FAILURE_STAGE=$failureStage
+                FULL_EXCEPTION_CHAIN=$exceptionDetails
+                ==========================
+            """.trimIndent()
+            SkyFilesLogger.i("SkyFiles", summary)
+        }
+    }
+
+    fun logExceptionChain(msg: String, throwable: Throwable) {
+        val detailMsg = buildString {
+            append("$msg\n")
+            append("Throwable class: ${throwable.javaClass.name}\n")
+            append("Throwable message: ${throwable.message}\n")
+            var cause: Throwable? = throwable.cause
+            var depth = 1
+            while (cause != null) {
+                append("Throwable cause $depth: ${cause.javaClass.name} - ${cause.message}\n")
+                cause = cause.cause
+                depth++
+            }
+            append("Stack Trace:\n${Log.getStackTraceString(throwable)}")
+        }
+        SkyFilesLogger.e("SkyFiles", detailMsg)
+    }
+
     @Throws(ClientException::class)
     private fun getSession(authority: Authority): Session {
         synchronized(sessions) {
@@ -605,47 +705,191 @@ object Client {
             }
             val password = authenticator.getPassword(authority)
                 ?: throw ClientException("No password found for $authority")
-            val hostAddress = resolveHostName(authority.host)
-            val connection = try {
-                client.connect(hostAddress, authority.port)
-            } catch (e: IOException) {
-                throw ClientException(e)
+
+            val authType = when {
+                AuthenticationContext.guest().let {
+                    authority.username == it.username && authority.domain == it.domain
+                            && password == it.password.concatToString()
+                } -> "GUEST"
+                AuthenticationContext.anonymous().let {
+                    authority.username == it.username && authority.domain == it.domain
+                            && password == it.password.concatToString()
+                } -> "ANONYMOUS"
+                else -> "PASSWORD"
             }
-            val authenticationContext =
-                AuthenticationContext(authority.username, password.toCharArray(), authority.domain)
-            session = try {
-                connection.authenticate(authenticationContext)
-            } catch (e: SMBRuntimeException) {
-                // We need to close the connection here, otherwise future authentications reusing it
-                // will receive an exception about no available credits.
-                connection.closeSafe()
-                throw ClientException(e)
-            // TODO: kotlinc: Type mismatch: inferred type is Session? but TypeVariable(V) was
-            //  expected
-            //}
-            }!!
-            sessions[authority] = session
-            return session
+
+            SmbDiagnosticsTracker.reset(authority.host)
+            try {
+                // Phase 7: Automatic TP-Link Detection
+                val hostUpper = authority.host.uppercase()
+                val autoCompat = hostUpper.contains("NAS") || hostUpper.contains("TP-LINK") || hostUpper.contains("ARCHER")
+
+                val hostAddress = resolveHostName(authority.host)
+                
+                // Try connection profiles
+                var connection: com.hierynomus.smbj.connection.Connection? = null
+                var activeClient = client
+                var lastEx: Exception? = null
+                var successfulProfile = "NONE"
+
+                val profilesToTry = if (autoCompat) {
+                    listOf("PROFILE_B", "PROFILE_C", "PROFILE_A")
+                } else {
+                    listOf("PROFILE_A", "PROFILE_B", "PROFILE_C")
+                }
+
+                for (profile in profilesToTry) {
+                    try {
+                        val config = when (profile) {
+                            "PROFILE_A" -> com.hierynomus.smbj.SmbConfig.builder().build()
+                            "PROFILE_B" -> com.hierynomus.smbj.SmbConfig.builder()
+                                .withDialects(com.hierynomus.mssmb2.SMB2Dialect.SMB_2_1, com.hierynomus.mssmb2.SMB2Dialect.SMB_2_0_2)
+                                .withSigningRequired(false)
+                                .withTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                                .withSoTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                                .build()
+                            "PROFILE_C" -> com.hierynomus.smbj.SmbConfig.builder()
+                                .withDialects(com.hierynomus.mssmb2.SMB2Dialect.SMB_2_0_2)
+                                .withSigningRequired(false)
+                                .withTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                                .withSoTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                                .build()
+                            else -> com.hierynomus.smbj.SmbConfig.builder().build()
+                        }
+                        val probeClient = com.hierynomus.smbj.SMBClient(config)
+                        val conn = probeClient.connect(hostAddress, authority.port)
+                        SmbDiagnosticsTracker.tcp = "PASS"
+                        connection = conn
+                        activeClient = probeClient
+                        successfulProfile = profile
+                        break
+                    } catch (e: Exception) {
+                        lastEx = e
+                        
+                        var isEofOrTransport = false
+                        var curr: Throwable? = e
+                        while (curr != null) {
+                            val className = curr.javaClass.name
+                            if (curr is java.io.EOFException || className.contains("EOFException") || className.contains("TransportException")) {
+                                isEofOrTransport = true
+                                break
+                            }
+                            curr = curr.cause
+                        }
+                        if (isEofOrTransport) {
+                            SmbDiagnosticsTracker.tcp = "PASS"
+                            SmbDiagnosticsTracker.negotiation = "FAIL"
+                            if (e.message?.contains("SMB1") == true || e.message?.contains("not supported") == true || isEofOrTransport) {
+                                SmbDiagnosticsTracker.serverAppearsSmb1Only = "true"
+                            }
+                        } else {
+                            SmbDiagnosticsTracker.tcp = "FAIL"
+                        }
+                    }
+                }
+
+                if (connection == null) {
+                    val ex = lastEx ?: IOException("All SMB connection profiles failed")
+                    SkyFilesLogger.e("SkyFiles", "ALL SMB PROFILES FAILED")
+                    SmbDiagnosticsTracker.failureStage = if (SmbDiagnosticsTracker.tcp == "FAIL") "TCP" else "NEGOTIATION"
+                    SmbDiagnosticsTracker.exceptionDetails = "${ex.javaClass.name}: ${ex.message}"
+                    SmbDiagnosticsTracker.logSummary()
+                    throw ClientException(ex)
+                }
+
+                SmbDiagnosticsTracker.negotiation = "PASS"
+                val dialect = try {
+                    val d = connection.connectionContext.negotiatedProtocol.dialect
+                    SmbDiagnosticsTracker.negotiatedDialect = d.toString()
+                    d
+                } catch (e: Exception) {
+                    throw ClientException(e)
+                }
+
+                val authenticationContext =
+                    AuthenticationContext(authority.username, password.toCharArray(), authority.domain)
+                
+                SmbDiagnosticsTracker.authentication = "PENDING"
+                session = try {
+                    val sess = connection.authenticate(authenticationContext)
+                    
+                    val context = connection.connectionContext
+                    val serverName = context.serverName ?: "UNKNOWN"
+                    val serverOS = "UNKNOWN"
+                    
+                    val secMode = try {
+                        val field = context.javaClass.getDeclaredField("serverSecurityMode")
+                        field.isAccessible = true
+                        field.getInt(context)
+                    } catch (e: Exception) {
+                        0
+                    }
+                    
+                    val signingEnabled = (secMode and 0x01) != 0
+                    val signingRequired = (secMode and 0x02) != 0
+                    
+                    SmbDiagnosticsTracker.serverName = serverName
+                    SmbDiagnosticsTracker.signingRequired = signingRequired.toString()
+                    SmbDiagnosticsTracker.signingEnabled = signingEnabled.toString()
+                    SmbDiagnosticsTracker.authentication = "PASS"
+                    sess
+                } catch (e: SMBRuntimeException) {
+                    val statusString = (e as? SMBApiException)?.status?.name ?: e.message ?: "UNKNOWN"
+                    SkyFilesLogger.e("SkyFiles", "AUTH FAILED\nstatus code=$statusString\nexception class=${e.javaClass.name}\nmessage=${e.message}")
+                    logExceptionChain("AUTH FAILED DETAILS", e)
+                    SmbDiagnosticsTracker.authentication = "FAIL"
+                    SmbDiagnosticsTracker.failureStage = "AUTH"
+                    SmbDiagnosticsTracker.exceptionDetails = "${e.javaClass.name}: ${e.message}"
+                    SmbDiagnosticsTracker.logSummary()
+                    connection.closeSafe()
+                    throw ClientException(e)
+                }!!
+                sessions[authority] = session
+                return session
+            } catch (e: Throwable) {
+                throw e
+            }
         }
     }
 
     @Throws(ClientException::class)
     private fun resolveHostName(hostName: String): String {
+        SmbDiagnosticsTracker.dns = "PENDING"
         val nameServiceClient = SingletonContext.getInstance().nameServiceClient
         val addresses = try {
             nameServiceClient.getAllByName(hostName, false).mapNotNull { it.toInetAddress() }
         } catch (e: UnknownHostException) {
+            SkyFilesLogger.e("SkyFiles", "DNS FAILED\nexception=${e.javaClass.name}: ${e.message}")
+            SmbDiagnosticsTracker.dns = "FAIL"
+            SmbDiagnosticsTracker.logSummary()
             throw ClientException(e)
         }
+        if (addresses.isEmpty()) {
+            val ex = UnknownHostException(hostName)
+            SkyFilesLogger.e("SkyFiles", "DNS FAILED\nexception=${ex.javaClass.name}: ${ex.message}")
+            SmbDiagnosticsTracker.dns = "FAIL"
+            SmbDiagnosticsTracker.logSummary()
+            throw ClientException(ex)
+        }
         val address = addresses.firstOrNull { it is Inet4Address } ?: addresses.first()
-        return address.hostAddress!!
+        val resolved = address.hostAddress!!
+        SmbDiagnosticsTracker.dns = "PASS"
+        return resolved
     }
 
     @Throws(ClientException::class)
     private fun getShare(session: Session, shareName: String): Share {
+        SmbDiagnosticsTracker.shareOpen = "PENDING"
         return try {
-            session.connectShare(shareName)
+            val share = session.connectShare(shareName)
+            SmbDiagnosticsTracker.shareOpen = "PASS"
+            SmbDiagnosticsTracker.logSummary()
+            share
         } catch (e: SMBRuntimeException) {
+            SkyFilesLogger.e("SkyFiles", "SHARE OPEN FAILED")
+            logExceptionChain("SHARE OPEN FAILED DETAILS", e)
+            SmbDiagnosticsTracker.shareOpen = "FAIL"
+            SmbDiagnosticsTracker.logSummary()
             throw ClientException(e)
         }
     }

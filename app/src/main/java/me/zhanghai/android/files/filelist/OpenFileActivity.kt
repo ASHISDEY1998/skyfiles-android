@@ -18,6 +18,7 @@ import me.zhanghai.android.files.provider.archive.isArchivePath
 import me.zhanghai.android.files.util.createViewIntent
 import me.zhanghai.android.files.util.extraPath
 import me.zhanghai.android.files.util.startActivitySafe
+import me.zhanghai.android.files.video.VideoPlayerActivity
 
 class OpenFileActivity : AppActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -33,6 +34,10 @@ class OpenFileActivity : AppActivity() {
     }
 
     private fun openFile(path: Path, mimeType: MimeType) {
+        if (mimeType.type == "video" || mimeType.value.startsWith("video/")) {
+            VideoPlayerActivity.start(this, path.toString())
+            return
+        }
         if (path.isArchivePath) {
             FileJobService.open(path, mimeType, false, this)
         } else {

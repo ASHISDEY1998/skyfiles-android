@@ -26,6 +26,7 @@ import me.zhanghai.android.files.util.extraPath
 import me.zhanghai.android.files.util.finish
 import me.zhanghai.android.files.util.startActivitySafe
 import me.zhanghai.android.files.util.withChooser
+import me.zhanghai.android.files.video.VideoPlayerActivity
 
 class OpenFileAsDialogFragment : AppCompatDialogFragment() {
     private val args by args<Args>()
@@ -40,6 +41,11 @@ class OpenFileAsDialogFragment : AppCompatDialogFragment() {
             .create()
 
     private fun openAs(mimeType: MimeType) {
+        if (mimeType.type == "video" || mimeType.value.startsWith("video/")) {
+            VideoPlayerActivity.start(requireContext(), args.path.toString())
+            finish()
+            return
+        }
         val intent = args.path.fileProviderUri.createViewIntent(mimeType)
             .addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
             .apply { extraPath = args.path }

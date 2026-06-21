@@ -40,6 +40,7 @@ import me.zhanghai.android.files.ui.CheckableItemBackground
 import me.zhanghai.android.files.util.isMaterial3Theme
 import me.zhanghai.android.files.util.layoutInflater
 import me.zhanghai.android.files.util.valueCompat
+import me.zhanghai.android.files.util.SkyFilesLogger
 import java.util.Locale
 
 class FileListAdapter(
@@ -212,6 +213,7 @@ class FileListAdapter(
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int, payloads: List<Any>) {
         val file = getItem(position)
+        SkyFilesLogger.d("FileListAdapter", "onBindViewHolder - binding item: ${file.name} at position $position, payloads: $payloads")
         val isDirectory = file.attributes.isDirectory
         val isEnabled = isFileSelectable(file) || isDirectory
         holder.itemLayout.isEnabled = isEnabled
@@ -237,6 +239,7 @@ class FileListAdapter(
         bindViewHolderAnimation(holder)
         holder.itemLayout.apply {
             setOnClickListener {
+                SkyFilesLogger.d("FileListAdapter", "Item clicked: ${file.name} (position $position)")
                 if (selectedFiles.isEmpty()) {
                     listener.openFile(file)
                 } else {
@@ -244,6 +247,7 @@ class FileListAdapter(
                 }
             }
             setOnLongClickListener {
+                SkyFilesLogger.d("FileListAdapter", "Item long clicked: ${file.name} (position $position)")
                 if (selectedFiles.isEmpty()) {
                     selectFile(file)
                 } else {

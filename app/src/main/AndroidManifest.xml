@@ -30,6 +30,10 @@
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission android:name="com.android.launcher.permission.INSTALL_SHORTCUT" />
 
     <!-- Crashlytics and Shizuku requires API 23. -->
@@ -41,6 +45,7 @@
       ~ TODO: Remove this attribute once Samsung respects the default value for it.
       -->
     <application
+        android:name=".app.SkyFilesApplication"
         android:allowBackup="true"
         android:banner="@drawable/banner"
         android:enableOnBackInvokedCallback="true"
@@ -58,7 +63,7 @@
         tools:ignore="GoogleAppIndexingWarning,UnusedAttribute">
 
         <activity
-            android:name="me.zhanghai.android.files.filelist.FileListActivity"
+            android:name="me.zhanghai.android.files.filelist.HomeActivity"
             android:exported="true"
             android:visibleToInstantApps="true"
             tools:ignore="UnusedAttribute">
@@ -67,6 +72,13 @@
                 <category android:name="android.intent.category.LAUNCHER" />
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
+        </activity>
+
+        <activity
+            android:name="me.zhanghai.android.files.filelist.FileListActivity"
+            android:exported="true"
+            android:visibleToInstantApps="true"
+            tools:ignore="UnusedAttribute">
             <intent-filter tools:ignore="AppLinkUrlError">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -396,5 +408,13 @@
         <meta-data
             android:name="firebase_crashlytics_collection_enabled"
             android:value="false" />
+
+        <activity
+            android:name="me.zhanghai.android.files.video.VideoPlayerActivity"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|keyboardHidden|keyboard"
+            android:supportsPictureInPicture="true"
+            android:theme="@style/Theme.MaterialFiles"
+            android:screenOrientation="sensor"
+            android:exported="false" />
     </application>
 </manifest>

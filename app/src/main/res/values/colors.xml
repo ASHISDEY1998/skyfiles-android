@@ -10,6 +10,8 @@
     <color name="dark_30_percent">#4D000000</color>
     <color name="dark_50_percent">#80000000</color>
     <color name="dark_70_percent">#B3000000</color>
+    <color name="skyfiles_background">#000000</color>
+    <color name="skyfiles_accent">#0A84FF</color>
 
     <color name="system_window_scrim_light">#99FFFFFF</color>
     <color name="system_window_scrim_dark">#66202124</color>

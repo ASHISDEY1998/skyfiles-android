@@ -18,4 +18,6 @@
 
     <!-- SevenZOutputFile requires SeekableByteChannel which requires Android N. -->
     <integer name="create_archive_type_seven_z_visibility">@integer/visibility_gone</integer>
+
+    <integer name="skyfiles_locations_columns">2</integer>
 </resources>

@@ -45,12 +45,14 @@ import androidx.drawerlayout.widget.DrawerLayout
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.commit
 import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.leinardi.android.speeddial.SpeedDialView
 import java8.nio.file.Path
 import java8.nio.file.Paths
+import kotlinx.coroutines.launch
 import kotlinx.parcelize.Parcelize
 import me.zhanghai.android.files.R
 import me.zhanghai.android.files.app.application
@@ -71,6 +73,8 @@ import me.zhanghai.android.files.file.fileProviderUri
 import me.zhanghai.android.files.file.isApk
 import me.zhanghai.android.files.file.isImage
 import me.zhanghai.android.files.filejob.FileJobService
+import me.zhanghai.android.files.video.VideoPlayerActivity
+import me.zhanghai.android.files.media.PlaylistSource
 import me.zhanghai.android.files.filelist.FileSortOptions.By
 import me.zhanghai.android.files.filelist.FileSortOptions.Order
 import me.zhanghai.android.files.fileproperties.FilePropertiesDialogFragment
@@ -132,7 +136,7 @@ import me.zhanghai.android.files.util.withChooser
 import me.zhanghai.android.files.viewer.image.ImageViewerActivity
 import kotlin.math.roundToInt
 
-class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.Listener,
+open class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.Listener,
     ConfirmReplaceFileDialogFragment.Listener, OpenApkDialogFragment.Listener,
     ConfirmDeleteFilesDialogFragment.Listener, CreateArchiveDialogFragment.Listener,
     RenameFileDialogFragment.Listener, CreateFileDialogFragment.Listener,
@@ -165,7 +169,7 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
     private val args by args<Args>()
     private val argsPath by lazy { args.intent.extraPath }
 
-    private val viewModel by viewModels { { FileListViewModel() } }
+    protected val viewModel by viewModels { { FileListViewModel() } }
 
     private lateinit var binding: Binding
 
@@ -580,13 +584,15 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
     private fun onCurrentPathChanged(path: Path) {
         updateOverlayToolbar()
         updateBottomToolbar()
+        (activity as? HomeActivity)?.updateCurrentPath(path)
+        RecentOpenRepository.recordNetworkConnection(path)
     }
 
     private fun onSearchViewExpandedChanged(expanded: Boolean) {
         updateViewSortMenuItems()
     }
 
-    private fun onFileListChanged(stateful: Stateful<List<FileItem>>) {
+    protected open fun onFileListChanged(stateful: Stateful<List<FileItem>>) {
         val files = stateful.value
         val isSearching = viewModel.searchState.isSearching
         when {
@@ -1198,6 +1204,11 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
     }
 
     override fun openFile(file: FileItem) {
+        if (!file.attributes.isDirectory) {
+            viewLifecycleOwner.lifecycleScope.launch {
+                RecentOpenRepository.addRecentFile(file.path.toString(), file.name)
+            }
+        }
         val pickOptions = viewModel.pickOptions
         if (pickOptions != null) {
             if (file.attributes.isDirectory) {
@@ -1260,6 +1271,31 @@ class FileListFragment : Fragment(), BreadcrumbLayout.Listener, FileListAdapter.
     private fun openFileWithIntent(file: FileItem, withChooser: Boolean) {
         val path = file.path
         val mimeType = file.mimeType
+        
+        if (mimeType.type == "video" || mimeType.value.startsWith("video/")) {
+            val playlist = mutableListOf<String>()
+            for (index in 0 until adapter.itemCount) {
+                val item = adapter.getItem(index)
+                if (!item.attributes.isDirectory && (item.mimeType.type == "video" || item.mimeType.value.startsWith("video/"))) {
+                    playlist.add(item.path.toString())
+                }
+            }
+            
+            val source = when {
+                this is MediaDetailFragment -> PlaylistSource.SOURCE_MEDIA_CATEGORY
+                viewModel.searchState.isSearching -> PlaylistSource.SOURCE_SEARCH
+                else -> PlaylistSource.SOURCE_FOLDER
+            }
+            
+            VideoPlayerActivity.start(
+                requireContext(),
+                path.toString(),
+                playlist,
+                source
+            )
+            return
+        }
+
         if (path.isArchivePath) {
             FileJobService.open(path, mimeType, withChooser, requireContext())
         } else {
