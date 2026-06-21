@@ -1,0 +1,33 @@
+# Ignore images and media
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.svg
+*.bmp
+*.ico
+*.mp4
+*.mkv
+*.mov
+
+# Ignore docs/other text formats that trigger semantic extraction
+*.md
+*.txt
+*.pdf
+*.html
+*.htm
+*.json
+*.xml
+*.properties
+*.gradle
+*.yml
+*.yaml
+
+# Ignore android resources and build artifacts
+build/
+.gradle/
+gradle/
+app/src/main/res/
+app/src/test/
+app/src/androidTest/
